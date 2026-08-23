@@ -1,0 +1,10 @@
+node_modules
+venv
+.next
+.env
+__pycache__
+*.pyc 
+venv/ 
+node_modules/ 
+.env 
+.next/ 
