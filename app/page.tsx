@@ -99,7 +99,7 @@ export default function Page() {
     if (!query.trim()) return
     setLoading(true)
     try {
-      const response = await fetch(`http://localhost:8000/api/search?query=${encodeURIComponent(query)}`)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/search?query=${encodeURIComponent(query)}`)
       const data = await response.json()
       setResults(data.results || [])
       
