@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import yt_dlp
 import uvicorn
-import urllib.request
+import requests
 import urllib.parse
 
 app = FastAPI(title="Music Streamer API")
@@ -23,7 +23,6 @@ def search_songs(query: str):
         'extract_flat': True, 
         'quiet': True
     }
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             music_query = f"{query} song audio"
@@ -54,7 +53,6 @@ def get_audio_stream(query: str):
         'quiet': True,
         'extractor_args': {'youtube': ['player_client=mweb,web']}
     }
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(query, download=False)
@@ -62,7 +60,6 @@ def get_audio_stream(query: str):
                 info = info['entries'][0]
 
             raw_stream_url = info.get("url")
-            # Redirect stream output through our backend proxy
             proxied_url = f"/api/proxy?url={urllib.parse.quote(raw_stream_url)}"
 
             return {
@@ -73,21 +70,35 @@ def get_audio_stream(query: str):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-# --- AUDIO STREAM PROXY ---
+# --- RANGE-AWARE AUDIO PROXY ---
 @app.get("/api/proxy")
-def proxy_audio(url: str):
-    try:
-        req = urllib.request.Request(
-            url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        res = urllib.request.urlopen(req)
-        
-        def stream_chunks():
-            while chunk := res.read(1024 * 64):
-                yield chunk
+def proxy_audio(url: str, request: Request):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
+    
+    # Forward range header from browser request if present
+    range_header = request.headers.get("range")
+    if range_header:
+        headers["Range"] = range_header
 
-        return StreamingResponse(stream_chunks(), media_type="audio/mpeg")
+    try:
+        req = requests.get(url, headers=headers, stream=True)
+        
+        response_headers = {
+            "Content-Type": req.headers.get("Content-Type", "audio/mpeg"),
+            "Content-Length": req.headers.get("Content-Length", ""),
+            "Content-Range": req.headers.get("Content-Range", ""),
+            "Accept-Ranges": "bytes",
+        }
+        # Filter out empty headers
+        response_headers = {k: v for k, v in response_headers.items() if v}
+
+        return StreamingResponse(
+            req.iter_content(chunk_size=64 * 1024),
+            status_code=req.status_code,
+            headers=response_headers,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
